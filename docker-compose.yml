@@ -1,0 +1,12 @@
+# Version of docker-compose.
+version: '3'
+
+services:
+   mix_app:
+      build:
+         context: .
+      ports:
+         # Mapping the port to make the Phoenix app accessible outside of the container.
+         - '8000:8000'
+      volumes:
+        - .:/app
