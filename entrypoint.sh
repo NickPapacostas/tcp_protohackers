@@ -1,2 +1,2 @@
 #!/bin/bash
-exec mix run run.exs --no-halt
+exec mix run --no-halt
