@@ -14,7 +14,7 @@ defmodule TcpTest.Application do
     Logger.info("HELLLO")
 
     [
-      {TcpTest.Server, String.to_integer(System.get_env("TCP_PORT") || "5001")}
+      {TcpTest.Chat.Supervisor, String.to_integer(System.get_env("TCP_PORT") || "5001")}
     ]
   end
 end

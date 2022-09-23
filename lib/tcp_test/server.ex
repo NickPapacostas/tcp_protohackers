@@ -3,9 +3,9 @@ defmodule TcpTest.Server do
 
   use GenServer
 
-  def start_link(state) do
-    Logger.info("BOOTING on port #{state}")
-    GenServer.start_link(__MODULE__, state, name: __MODULE__)
+  def start_link(listening_port) do
+    Logger.info("BOOTING on port #{listening_port}")
+    GenServer.start_link(__MODULE__, listening_port, name: __MODULE__)
   end
 
   ## Callbacks
@@ -15,10 +15,8 @@ defmodule TcpTest.Server do
     {:ok, socket} =
       :gen_tcp.listen(
         port,
-        [:binary, packet: :raw, active: false, reuseaddr: true]
+        [:binary, packet: :line, active: true, reuseaddr: true]
       )
-
-    TcpTest.ClientSupervisor.start_link(socket)
 
     Logger.info("Listening socket #{inspect(socket)}")
     {:ok, socket, {:continue, :accept_connection}}

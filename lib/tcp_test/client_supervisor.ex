@@ -1,8 +1,8 @@
 defmodule TcpTest.ClientSupervisor do
   use DynamicSupervisor
 
-  def start_link(listening_socket) do
-    DynamicSupervisor.start_link(__MODULE__, listening_socket, name: __MODULE__)
+  def start_link(_args) do
+    DynamicSupervisor.start_link(__MODULE__, %{}, name: __MODULE__)
   end
 
   def start_child(client_socket) do
@@ -13,7 +13,7 @@ defmodule TcpTest.ClientSupervisor do
   end
 
   @impl true
-  def init(init_arg) do
+  def init(_args) do
     DynamicSupervisor.init(strategy: :one_for_one)
   end
 end
