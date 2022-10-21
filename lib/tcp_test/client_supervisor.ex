@@ -6,7 +6,11 @@ defmodule TcpTest.ClientSupervisor do
   end
 
   def start_child(client_socket) do
-    spec = %{id: TcpTest.Client, start: {TcpTest.Client, :start_link, [client_socket]}}
+    spec = %{
+      id: TcpTest.MaliciousClient,
+      start: {TcpTest.MaliciousClient, :start_link, [client_socket]}
+    }
+
     {:ok, pid} = DynamicSupervisor.start_child(__MODULE__, spec)
     :gen_tcp.controlling_process(client_socket, pid)
     {:ok, pid}
