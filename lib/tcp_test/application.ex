@@ -11,10 +11,8 @@ defmodule TcpTest.Application do
   def stop(_state), do: Logger.info("Application shutdown gracefully")
 
   def children() do
-    Logger.info("HELLLO")
-
     [
-      {TcpTest.Chat.Supervisor, String.to_integer(System.get_env("TCP_PORT") || "5001")}
+      {TcpTest.Speed.Supervisor, String.to_integer(System.get_env("TCP_PORT") || "5001")}
     ]
   end
 end
