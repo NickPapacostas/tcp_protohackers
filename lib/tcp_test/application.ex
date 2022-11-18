@@ -12,7 +12,7 @@ defmodule TcpTest.Application do
 
   def children() do
     [
-      {TcpTest.Speed.Supervisor, String.to_integer(System.get_env("TCP_PORT") || "5001")}
+      {TcpTest.LineReverse.Supervisor, String.to_integer(System.get_env("TCP_PORT") || "5001")}
     ]
   end
 end
