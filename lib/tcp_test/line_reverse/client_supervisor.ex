@@ -1,4 +1,6 @@
 defmodule TcpTest.LineReverse.ClientSupervisor do
+  require Logger
+
   use DynamicSupervisor
 
   def start_link(_args) do
@@ -19,8 +21,21 @@ defmodule TcpTest.LineReverse.ClientSupervisor do
     DynamicSupervisor.init(strategy: :one_for_one, restart: :transient)
   end
 
+  def close_session(session_id) do
+    case :pg.get_members(session_id) do
+      [pid] ->
+        TcpTest.LineReverse.Server.close(pid)
+        DynamicSupervisor.terminate_child(__MODULE__, pid)
+
+      _ ->
+        Logger.warning(
+          "CLIENTSUPERVISOR unable to find server for session_id: #{inspect(session_id)} to kill"
+        )
+    end
+  end
+
   def close(pid, address, port) do
-    TcpTest.LineReverse.Server.close(address, port)
+    TcpTest.LineReverse.Server.close(pid)
     DynamicSupervisor.terminate_child(__MODULE__, pid)
   end
 end

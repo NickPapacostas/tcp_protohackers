@@ -13,6 +13,10 @@ defmodule TcpTest.LineReverse.Supervisor do
 
   def children(tcp_port) do
     [
+      %{
+        id: :pg,
+        start: {:pg, :start_link, []}
+      },
       {TcpTest.LineReverse.ClientSupervisor, []},
       {TcpTest.LineReverse.Server, tcp_port}
     ]

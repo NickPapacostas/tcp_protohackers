@@ -12,6 +12,7 @@ defmodule TcpTest.LineReverse.Client do
 
   @impl true
   def init([socket, session_id, address, port]) do
+    :pg.join(session_id, self())
     GenServer.cast(self(), :connect_attempt)
     Process.send_after(self(), :check_timeout, 60_000)
 
@@ -54,7 +55,7 @@ defmodule TcpTest.LineReverse.Client do
 
         if NaiveDateTime.compare(last_message_receieved_at, a_minute_ago) == :lt do
           Logger.info("Client timed out #{state.session_id}")
-          close_session(state)
+          close_session(state.session_id, state)
         else
           Process.send_after(self(), :check_timeout, 20_000)
           {:noreply, state}
@@ -82,11 +83,12 @@ defmodule TcpTest.LineReverse.Client do
       state = %{state | retries: Map.put(retries, start_byte, previous_count + 1)}
 
       Logger.info(
-        "Client #{state.session_id} retrying #{start_byte}, count: #{previous_count + 1} max acked #{max_acked}"
+        "Client #{state.session_id} retrying #{start_byte}, expecting: #{inspect(start_byte + byte_size(data))} count: #{previous_count + 1} max acked #{max_acked}"
       )
 
       if previous_count + 1 > 30 do
-        close_session(state)
+        Logger.info("RETRY TIMEOUT #{state.session_id} #{start_byte}")
+        {:noreply, state}
       else
         reply(state, message, start_byte)
         {:noreply, state}
@@ -108,9 +110,13 @@ defmodule TcpTest.LineReverse.Client do
         GenServer.cast(self(), :connect_attempt)
         {:noreply, state}
 
-      ["", "data", _session_id, pos, data, ""] ->
+      ["", "data", ^session_id, pos, data, ""] ->
         Logger.info("Client #{session_id} raw receieved: #{inspect(data <> <<0>>)}")
         handle_data(pos, data, state)
+
+      ["", "data", session_id, pos, data, ""] ->
+        Logger.info("OTHER SESSION DATA #{session_id} raw receieved: #{inspect(data <> <<0>>)}")
+        {:noreply, state}
 
       ["", "ack", session_id, length, ""] ->
         Logger.info(
@@ -119,8 +125,8 @@ defmodule TcpTest.LineReverse.Client do
 
         handle_ack(length, state)
 
-      ["", "close", ^session_id, ""] ->
-        close_session(state)
+      ["", "close", session_id, ""] ->
+        close_session(session_id, state)
 
       invalid_message ->
         Logger.warning(
@@ -138,7 +144,8 @@ defmodule TcpTest.LineReverse.Client do
            session_id: session_id,
            total_bytes: total_bytes,
            sent_replies: sent_replies,
-           data_received: data_received
+           data_received: data_received,
+           unfinished_line: {unfinished_start_byte, unfinished_value}
          } = state
        ) do
     {position, ""} = Integer.parse(position_str)
@@ -163,11 +170,35 @@ defmodule TcpTest.LineReverse.Client do
 
           if position == last_data_start do
             if byte_size(existing_payload) < byte_size(different_data) do
+              unfinished_value =
+                if unfinished_start_byte do
+                  # [previous_unfinished_from_message | _] = Enum.reverse(String.split("/")) 
+                  # previous_size = byte_size(existing_payload)
+                  # <<_existing::binary-size(previous_size), new::binary>> = different_data
+                  # case different_data do
+                  #   <<_existing::binary-size(previous_size), new::binary>> ->
+
+                  # end
+                  # case String.reverse(unfinished_value) do
+                  #   <<to_replace::binary-size(previous_size), rest::binary>> ->
+                  #     String.reverse(rest)
+
+                  #   _ ->
+                  #     Logger.error(
+                  #       "REWRITING UNFINISHED FAILED previous: #{inspect(existing_payload)} unfinished_value #{inspect(unfinished_value)}"
+                  #     )
+
+                  #     nil
+                  # end
+                else
+                  unfinished_value
+                end
+
               state = %{
                 state
                 | data_received: Map.put(data_received, position, data),
-                  unfinished_line: {nil, nil},
-                  total_bytes: position
+                  total_bytes: position,
+                  unfinished_line: {unfinished_start_byte, unfinished_value}
               }
 
               Logger.warning(
@@ -176,6 +207,8 @@ defmodule TcpTest.LineReverse.Client do
               )
 
               send_and_store_replies(last_data_start, data, state)
+            else
+              {:noreply, state}
             end
           else
             Logger.warning(
@@ -210,6 +243,7 @@ defmodule TcpTest.LineReverse.Client do
     {start_byte, data} =
       case unfinished_line do
         {nil, nil} -> {total_bytes, data}
+        {unfinished_start_byte, nil} -> {unfinished_start_byte, data}
         {unfinished_start_byte, unfinished} -> {unfinished_start_byte, unfinished <> data}
       end
 
@@ -352,15 +386,15 @@ defmodule TcpTest.LineReverse.Client do
            }}
 
         {l, tb} when l > tb ->
-          close_session(state)
+          close_session(session_id, state)
       end
     end
   end
 
-  defp close_session(state) do
-    Logger.info("Closing session #{state.session_id}...")
-    reply(state, "/close/#{state.session_id}/")
-    TcpTest.LineReverse.ClientSupervisor.close(self(), state.address, state.port)
+  defp close_session(session_id, state) do
+    Logger.info("Closing session #{session_id}...")
+    reply(state, "/close/#{session_id}/")
+    TcpTest.LineReverse.ClientSupervisor.close_session(session_id)
     {:noreply, state}
   end
 

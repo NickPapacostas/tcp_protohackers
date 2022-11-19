@@ -7,8 +7,8 @@ defmodule TcpTest.LineReverse.Server do
     GenServer.start_link(__MODULE__, listening_port, name: __MODULE__)
   end
 
-  def close(address, port) do
-    GenServer.cast(__MODULE__, {:close, address, port})
+  def close(pid) do
+    GenServer.cast(__MODULE__, {:close, pid})
   end
 
   ## Callbacks
@@ -17,33 +17,40 @@ defmodule TcpTest.LineReverse.Server do
   def init(port) do
     res = :gen_udp.open(port, [:binary, active: true])
 
-    IO.inspect("RES")
-    IO.inspect(res)
     {:ok, socket} = res
     Logger.info("Listening socket #{inspect(socket)}")
-    # GenServer.cast(self(), :listen_and_dispatch)
     {:ok, %{socket: socket, active_sessions: %{}}}
   end
 
   @impl true
-  def handle_cast(:listen_and_dispatch, %{socket: socket, active_sessions: sessions}) do
-    updated_state = listen_and_dispatch(socket, sessions)
-    GenServer.cast(self(), :listen_and_dispatch)
-    {:noreply, updated_state}
+  def handle_cast({:close, pid}, %{active_sessions: sessions} = state) do
+    case Enum.find(sessions, fn {{address, port}, client_pid} ->
+           client_pid == pid
+         end) do
+      {session_key, _} ->
+        Logger.info(
+          "Server removing address port #{inspect(session_key)}pid #{inspect(pid)}from sessions"
+        )
+
+        {:noreply, %{state | active_sessions: Map.delete(sessions, session_key)}}
+
+      _ ->
+        Logger.info(
+          "Server FAILED removing address port pid #{inspect(pid)}from sessions #{inspect(sessions)}"
+        )
+
+        {:noreply, state}
+    end
   end
 
-  @impl true
-  def handle_cast({:close, address, port}, %{active_sessions: sessions} = state) do
-    Logger.info("Server removing address #{inspect(address)} port #{inspect(port)} from sessions")
-    GenServer.cast(self(), :listen_and_dispatch)
-    {:noreply, %{state | active_sessions: Map.delete(sessions, {address, port})}}
-  end
-
-  def handle_info({:udp, _, data}, %{socket: socket, active_sessions: sessions} = state) do
+  def handle_info(
+        {:udp, _socket, address, port, data},
+        %{socket: socket, active_sessions: sessions} = state
+      ) do
     Logger.info("SERVER UDP PACKET #{data}")
-    updated_sessions = process_message(socket, data, sessions)
-    %{socket: socket, active_sessions: updated_sessions}
-    {:noreply, state}
+    updated_sessions = process_message(socket, {address, port, data}, sessions)
+
+    {:noreply, %{socket: socket, active_sessions: updated_sessions}}
   end
 
   def handle_info({:udp_closed, _}, state), do: {:stop, :normal, state}
@@ -54,22 +61,7 @@ defmodule TcpTest.LineReverse.Server do
     {:noreply, state}
   end
 
-  defp listen_and_dispatch(socket, sessions) do
-    case :gen_udp.recv(socket, 0, 1_000) do
-      {:ok, message} ->
-        Logger.info("Received: #{inspect(message)}")
-        updated_sessions = process_message(socket, message, sessions)
-        %{socket: socket, active_sessions: updated_sessions}
-
-      error ->
-        Logger.error("Timeout: #{inspect(error)}")
-        %{socket: socket, active_sessions: sessions}
-    end
-  end
-
   defp process_message(socket, {address, port, data}, sessions) do
-    Logger.info("Server processing #{data} #{inspect(sessions)}")
-
     case Map.get(sessions, {address, port}) do
       nil ->
         case String.split(data, "/") do
