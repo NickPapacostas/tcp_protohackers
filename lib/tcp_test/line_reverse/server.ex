@@ -15,13 +15,13 @@ defmodule TcpTest.LineReverse.Server do
 
   @impl true
   def init(port) do
-    res = :gen_udp.open(port, [:binary, active: false])
+    res = :gen_udp.open(port, [:binary, active: true])
 
     IO.inspect("RES")
     IO.inspect(res)
     {:ok, socket} = res
     Logger.info("Listening socket #{inspect(socket)}")
-    GenServer.cast(self(), :listen_and_dispatch)
+    # GenServer.cast(self(), :listen_and_dispatch)
     {:ok, %{socket: socket, active_sessions: %{}}}
   end
 
@@ -39,14 +39,30 @@ defmodule TcpTest.LineReverse.Server do
     {:noreply, %{state | active_sessions: Map.delete(sessions, {address, port})}}
   end
 
+  def handle_info({:udp, _, data}, %{socket: socket, active_sessions: sessions} = state) do
+    Logger.info("SERVER UDP PACKET #{data}")
+    updated_sessions = process_message(socket, data, sessions)
+    %{socket: socket, active_sessions: updated_sessions}
+    {:noreply, state}
+  end
+
+  def handle_info({:udp_closed, _}, state), do: {:stop, :normal, state}
+  def handle_info({:udp_error, _}, state), do: {:stop, :normal, state}
+
+  def handle_info(unkown_message, state) do
+    Logger.warning("Server received unkown_message #{inspect(unkown_message)}")
+    {:noreply, state}
+  end
+
   defp listen_and_dispatch(socket, sessions) do
-    case :gen_udp.recv(socket, 0, 200) do
+    case :gen_udp.recv(socket, 0, 1_000) do
       {:ok, message} ->
         Logger.info("Received: #{inspect(message)}")
         updated_sessions = process_message(socket, message, sessions)
         %{socket: socket, active_sessions: updated_sessions}
 
       error ->
+        Logger.error("Timeout: #{inspect(error)}")
         %{socket: socket, active_sessions: sessions}
     end
   end
@@ -84,18 +100,5 @@ defmodule TcpTest.LineReverse.Server do
         GenServer.cast(client_pid, {:process_message, data})
         sessions
     end
-  end
-
-  def handle_info(unkown_message, state) do
-    Logger.warning("Server received unkown_message #{inspect(unkown_message)}")
-    {:noreply, state}
-  end
-
-  defp reply(socket, address, port, data) do
-    Logger.info(
-      "Replying to #{inspect(socket)} #{inspect(address)} #{inspect(port)}: #{inspect(data)}"
-    )
-
-    :gen_udp.send(socket, address, port, data)
   end
 end
