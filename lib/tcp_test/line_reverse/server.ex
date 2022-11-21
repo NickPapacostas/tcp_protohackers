@@ -7,8 +7,8 @@ defmodule TcpTest.LineReverse.Server do
     GenServer.start_link(__MODULE__, listening_port, name: __MODULE__)
   end
 
-  def close(pid) do
-    GenServer.cast(__MODULE__, {:close, pid})
+  def close(pid, session_id) do
+    GenServer.cast(__MODULE__, {:close, pid, session_id})
   end
 
   ## Callbacks
@@ -23,15 +23,16 @@ defmodule TcpTest.LineReverse.Server do
   end
 
   @impl true
-  def handle_cast({:close, pid}, %{active_sessions: sessions} = state) do
+  def handle_cast({:close, pid, session_id}, %{active_sessions: sessions} = state) do
     case Enum.find(sessions, fn {{address, port}, client_pid} ->
            client_pid == pid
          end) do
-      {session_key, _} ->
+      {{address, port} = session_key, _} ->
         Logger.info(
-          "Server removing address port #{inspect(session_key)}pid #{inspect(pid)}from sessions"
+          "Server removing address port #{inspect(session_key)}pid #{inspect(pid)} session_id #{session_id} from sessions"
         )
 
+        Process.send_after(self(), {:retransmit_close, address, port, session_id, 0}, 3_000)
         {:noreply, %{state | active_sessions: Map.delete(sessions, session_key)}}
 
       _ ->
@@ -44,10 +45,30 @@ defmodule TcpTest.LineReverse.Server do
   end
 
   def handle_info(
+        {:retransmit_close, address, port, session_key, attempts},
+        %{socket: socket, active_sessions: sessions} = state
+      ) do
+    if attempts > 10 do
+      {:noreply, state}
+    else
+      Logger.info("SERVER RETRANSMITTING CLOSE #{session_key}, attempts: #{attempts}")
+      :gen_udp.send(socket, address, port, "/close/#{session_key}/")
+
+      Process.send_after(
+        self(),
+        {:retransmit_close, address, port, session_key, attempts + 1},
+        3_000
+      )
+
+      {:noreply, state}
+    end
+  end
+
+  def handle_info(
         {:udp, _socket, address, port, data},
         %{socket: socket, active_sessions: sessions} = state
       ) do
-    Logger.info("SERVER UDP PACKET #{data}")
+    Logger.info("SERVER UDP PACKET #{data}, bytes: #{inspect(data <> <<0>>)}")
     updated_sessions = process_message(socket, {address, port, data}, sessions)
 
     {:noreply, %{socket: socket, active_sessions: updated_sessions}}
@@ -83,8 +104,18 @@ defmodule TcpTest.LineReverse.Server do
                 sessions
             end
 
-          non_connect_message ->
-            Logger.info("Server non connect #{inspect(non_connect_message)} #{inspect(sessions)}")
+          ["", "close", session_id, ""] ->
+            Logger.info(
+              "Server received close for dead session #{inspect(session_id)} #{inspect(sessions)}"
+            )
+
+            sessions
+
+          bad_message ->
+            Logger.warning(
+              "Server received bad bad_message #{inspect(bad_message)} #{inspect(sessions)}"
+            )
+
             sessions
         end
 

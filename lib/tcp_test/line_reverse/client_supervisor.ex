@@ -24,7 +24,7 @@ defmodule TcpTest.LineReverse.ClientSupervisor do
   def close_session(session_id) do
     case :pg.get_members(session_id) do
       [pid] ->
-        TcpTest.LineReverse.Server.close(pid)
+        TcpTest.LineReverse.Server.close(pid, session_id)
         DynamicSupervisor.terminate_child(__MODULE__, pid)
 
       _ ->
@@ -32,10 +32,5 @@ defmodule TcpTest.LineReverse.ClientSupervisor do
           "CLIENTSUPERVISOR unable to find server for session_id: #{inspect(session_id)} to kill"
         )
     end
-  end
-
-  def close(pid, address, port) do
-    TcpTest.LineReverse.Server.close(pid)
-    DynamicSupervisor.terminate_child(__MODULE__, pid)
   end
 end
